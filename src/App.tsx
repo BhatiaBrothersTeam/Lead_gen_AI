@@ -562,11 +562,11 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 justify-end">
+        {/* <div className="flex items-center gap-4 justify-end">
           <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#6B2BFF] to-[#D0B8FF] flex items-center justify-center text-[10px] font-bold text-white border-2 border-white shadow-sm">
             BB
           </div>
-        </div>
+        </div> */}
       </header>
 
       {/* Body with Sidebar and Main */}
