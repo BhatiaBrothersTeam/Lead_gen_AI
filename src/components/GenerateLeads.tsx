@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo, useEffect } from "react";
 import * as React from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { generateLeads, type Lead } from "@/src/lib/groq";
+import { generateLeads, type Lead } from "@/src/lib/claude";
 import { toast } from "sonner";
 import {
   Download, Loader2, Upload, Search, Building2, User, Mail, Phone, Globe,

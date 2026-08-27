@@ -1,25 +1,23 @@
 import os
 import json
 import logging
-import httpx
 from typing import List, Dict, Any
+from anthropic import AsyncAnthropic
 
 logger = logging.getLogger(__name__)
 
 async def extract_leads(search_results: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     """
-    Sends search results to Groq to extract B2B leads based STRICTLY on the search data.
+    Sends search results to Claude to extract B2B leads based STRICTLY on the search data.
     """
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        raise ValueError("GROQ_API_KEY is not defined in the environment.")
-
-    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+        raise ValueError("ANTHROPIC_API_KEY is not defined in the environment.")
 
     if not search_results:
         return []
 
-    # Format search results for the Groq prompt
+    # Format search results for the Claude prompt
     formatted_results = []
     for index, res in enumerate(search_results):
         formatted_results.append(f"""[Search Result #{index + 1}]
@@ -71,40 +69,24 @@ JSON Output Format:
   ]
 }}"""
 
+    client = AsyncAnthropic(api_key=api_key)
+
     try:
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are a precise data-extraction assistant. You only output valid JSON based strictly on the provided context."
-                },
+        response = await client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=4000,
+            system="You are a precise data-extraction assistant. You only output valid JSON based strictly on the provided context.",
+            messages=[
                 {
                     "role": "user",
-                    "content": prompt
+                    "content": prompt,
                 }
             ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.2,
-            "max_tokens": 4096
-        }
-
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            response = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers=headers,
-                json=payload
-            )
-            response.raise_for_status()
-            res_data = response.json()
+        )
 
         text = ""
-        if "choices" in res_data and len(res_data["choices"]) > 0:
-            text = res_data["choices"][0]["message"]["content"].strip()
+        if response.content and len(response.content) > 0:
+            text = response.content[0].text.strip()
 
         if not text:
             return []
@@ -124,6 +106,5 @@ JSON Output Format:
             
         return []
     except Exception as e:
-        logger.error(f"Error extracting leads using Groq service: {e}")
+        logger.error(f"Error extracting leads using Claude service: {e}")
         raise e
-
