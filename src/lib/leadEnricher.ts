@@ -88,7 +88,7 @@ JSON Output Format:
 }
 `;
 
-        const modelName = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+        const modelName = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 
         const response = await groq.chat.completions.create({
           model: modelName,
@@ -103,6 +103,7 @@ JSON Output Format:
             },
           ],
           response_format: { type: "json_object" },
+          max_tokens: 4096
         });
 
         let text = response.choices[0]?.message?.content?.trim() || "";

@@ -73,7 +73,7 @@ JSON Output Format:
   "linkedIn": "LinkedIn URL or constructed fallback"
 }}"""
 
-        model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
@@ -91,7 +91,8 @@ JSON Output Format:
                 }
             ],
             "response_format": {"type": "json_object"},
-            "temperature": 0.2
+            "temperature": 0.2,
+            "max_tokens": 4096
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:

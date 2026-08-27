@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GROQ_API_KEY': JSON.stringify(env.GROQ_API_KEY),
-      'process.env.GROQ_MODEL': JSON.stringify(env.GROQ_MODEL || 'llama-3.3-70b-versatile'),
+      'process.env.GROQ_MODEL': JSON.stringify(env.GROQ_MODEL || 'openai/gpt-oss-20b'),
       'process.env.OPENAI_API_KEY': JSON.stringify(env.OPENAI_API_KEY),
       'process.env.ANTHROPIC_API_KEY': JSON.stringify(env.ANTHROPIC_API_KEY),
       'process.env.XAI_API_KEY': JSON.stringify(env.XAI_API_KEY),

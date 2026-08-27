@@ -14,7 +14,7 @@ async def extract_leads(search_results: List[Dict[str, str]]) -> List[Dict[str, 
     if not api_key:
         raise ValueError("GROQ_API_KEY is not defined in the environment.")
 
-    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
     if not search_results:
         return []
@@ -89,7 +89,8 @@ JSON Output Format:
                 }
             ],
             "response_format": {"type": "json_object"},
-            "temperature": 0.2
+            "temperature": 0.2,
+            "max_tokens": 4096
         }
 
         async with httpx.AsyncClient(timeout=45.0) as client:

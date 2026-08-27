@@ -95,7 +95,7 @@ Return a JSON object containing a "leads" array. Each object in the "leads" arra
 
 Minimum Leads Required: 30–50`;
 
-  const modelName = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+  const modelName = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 
   try {
     const response = await groq.chat.completions.create({
@@ -107,6 +107,7 @@ Minimum Leads Required: 30–50`;
         },
       ],
       response_format: { type: "json_object" },
+      max_tokens: 4096
     });
 
     const text = response.choices[0]?.message?.content;
