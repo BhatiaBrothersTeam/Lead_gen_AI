@@ -3,8 +3,8 @@ import json
 import logging
 import re
 import asyncio
+import httpx
 from typing import List, Dict, Any, Callable, Optional, Union, Coroutine
-from anthropic import AsyncAnthropic
 from backend.services.company_discovery import serper_search
 
 logger = logging.getLogger(__name__)
@@ -73,22 +73,38 @@ JSON Output Format:
   "linkedIn": "LinkedIn URL or constructed fallback"
 }}"""
 
-        client = AsyncAnthropic(api_key=api_key)
-        response = await client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=1000,
-            system="You are a precise data-enrichment assistant. You only output valid JSON based strictly on the provided context.",
-            messages=[
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a precise data-enrichment assistant. You only output valid JSON based strictly on the provided context."
+                },
                 {
                     "role": "user",
-                    "content": prompt,
+                    "content": prompt
                 }
             ],
-        )
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json=payload
+            )
+            response.raise_for_status()
+            res_data = response.json()
 
         text = ""
-        if response.content and len(response.content) > 0:
-            text = response.content[0].text.strip()
+        if "choices" in res_data and len(res_data["choices"]) > 0:
+            text = res_data["choices"][0]["message"]["content"].strip()
 
         if not text:
             return lead
@@ -129,11 +145,11 @@ async def enrich_leads(
     """
     Enriches a list of leads by searching for missing contact details in batches.
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     serper_key = os.getenv("SERPER_API_KEY")
 
     if not api_key or not serper_key:
-        logger.warning("ANTHROPIC_API_KEY or SERPER_API_KEY is not defined. Skipping enrichment.")
+        logger.warning("GROQ_API_KEY or SERPER_API_KEY is not defined. Skipping enrichment.")
         return leads
 
     enriched_leads = []

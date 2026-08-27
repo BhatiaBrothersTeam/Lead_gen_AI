@@ -1,8 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { Groq } from "groq-sdk";
 
-// Initialize Anthropic client using the key from process.env
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "",
+// Initialize Groq client using the key from process.env
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY || "",
+  dangerouslyAllowBrowser: true
 });
 
 export interface ProductAnalysisInput {
@@ -28,9 +29,9 @@ export interface ProductAnalysisResult {
  * Analyzes the product input using Claude to identify industries, buyer types, competitors, and keywords.
  */
 export async function analyzeProduct(input: ProductAnalysisInput): Promise<ProductAnalysisResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY is not defined in the environment.");
+    throw new Error("GROQ_API_KEY is not defined in the environment.");
   }
 
   const prompt = `Act as an expert B2B product researcher and market analyst specializing in the Middle East / GCC market.
@@ -67,19 +68,22 @@ JSON format:
 }`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5",
-      max_tokens: 2000,
-      system: "You are a precise B2B market intelligence data extraction assistant. You only output valid raw JSON.",
+    const response = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
       messages: [
+        {
+          role: "system",
+          content: "You are a precise B2B market intelligence data extraction assistant. You only output valid raw JSON."
+        },
         {
           role: "user",
           content: prompt,
         },
       ],
+      response_format: { type: "json_object" },
     });
 
-    let text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
+    let text = response.choices[0]?.message?.content?.trim() || "";
     if (!text) {
       throw new Error("Empty response from Anthropic Claude API");
     }

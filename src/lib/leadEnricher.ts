@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { Groq } from "groq-sdk";
 import { SerperSearchProvider } from "./searchService";
 import { ExtractedLead } from "./leadExtractor";
 
@@ -9,16 +9,16 @@ export async function enrichLeads(
   leads: ExtractedLead[],
   progressCallback?: (msg: string) => void
 ): Promise<ExtractedLead[]> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   const serperKey = process.env.SERPER_API_KEY;
 
   if (!apiKey || !serperKey) {
-    console.warn("ANTHROPIC_API_KEY or SERPER_API_KEY environment variable is not defined. Skipping lead enrichment.");
+    console.warn("GROQ_API_KEY or SERPER_API_KEY environment variable is not defined. Skipping lead enrichment.");
     return leads;
   }
 
   const searchProvider = new SerperSearchProvider(serperKey);
-  const anthropic = new Anthropic({ apiKey });
+  const groq = new Groq({ apiKey, dangerouslyAllowBrowser: true });
 
   const enrichedLeads: ExtractedLead[] = [];
   const batchSize = 3; // Keep batch size small to avoid overloading rate limits and stay highly responsive
@@ -88,19 +88,22 @@ JSON Output Format:
 }
 `;
 
-        const response = await anthropic.messages.create({
-          model: "claude-haiku-4-5",
-          max_tokens: 1000,
-          system: "You are a precise data-enrichment assistant. You only output valid JSON based strictly on the provided context.",
+        const response = await groq.chat.completions.create({
+          model: "llama-3.3-70b-versatile",
           messages: [
+            {
+              role: "system",
+              content: "You are a precise data-enrichment assistant. You only output valid JSON based strictly on the provided context."
+            },
             {
               role: "user",
               content: prompt,
             },
           ],
+          response_format: { type: "json_object" },
         });
 
-        let text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
+        let text = response.choices[0]?.message?.content?.trim() || "";
         if (!text) return lead;
 
         // Strip markdown code block wrappers

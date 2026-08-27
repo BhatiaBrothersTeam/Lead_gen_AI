@@ -1,8 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { Groq } from "groq-sdk";
 import { SearchResult } from "./searchService";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "",
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY || "",
+  dangerouslyAllowBrowser: true
 });
 
 export interface ExtractedLead {
@@ -23,9 +24,9 @@ export interface ExtractedLead {
  * Sends search results to Claude to extract B2B leads based STRICTLY on the search data.
  */
 export async function extractLeads(searchResults: SearchResult[]): Promise<ExtractedLead[]> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY is not defined in the environment.");
+    throw new Error("GROQ_API_KEY is not defined in the environment.");
   }
 
   if (searchResults.length === 0) {
@@ -84,19 +85,22 @@ JSON Output Format:
 }`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5",
-      max_tokens: 4000,
-      system: "You are a precise data-extraction assistant. You only output valid JSON based strictly on the provided context.",
+    const response = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
       messages: [
+        {
+          role: "system",
+          content: "You are a precise data-extraction assistant. You only output valid JSON based strictly on the provided context."
+        },
         {
           role: "user",
           content: prompt,
         },
       ],
+      response_format: { type: "json_object" },
     });
 
-    let text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
+    let text = response.choices[0]?.message?.content?.trim() || "";
     if (!text) {
       return [];
     }
