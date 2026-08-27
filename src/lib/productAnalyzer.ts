@@ -67,7 +67,7 @@ JSON format:
   "alternativeSearchTerms": ["Alternative Term 1", "Alternative Term 2"]
 }`;
 
-  const modelName = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
+  const modelName = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
   try {
     const response = await groq.chat.completions.create({

@@ -19,7 +19,7 @@ async def analyze_product(
     if not api_key:
         raise ValueError("GROQ_API_KEY is not defined in the environment.")
 
-    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
     prompt = f"""Act as an expert B2B product researcher and market analyst specializing in the Middle East / GCC market.
 Analyze the following product/service details to help us find high-quality sales leads:

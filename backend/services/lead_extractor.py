@@ -14,7 +14,7 @@ async def extract_leads(search_results: List[Dict[str, str]]) -> List[Dict[str, 
     if not api_key:
         raise ValueError("GROQ_API_KEY is not defined in the environment.")
 
-    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
     if not search_results:
         return []
