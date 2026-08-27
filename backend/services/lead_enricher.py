@@ -73,12 +73,13 @@ JSON Output Format:
   "linkedIn": "LinkedIn URL or constructed fallback"
 }}"""
 
+        model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         payload = {
-            "model": "llama-3.3-70b-versatile",
+            "model": model,
             "messages": [
                 {
                     "role": "system",

@@ -8,11 +8,13 @@ logger = logging.getLogger(__name__)
 
 async def extract_leads(search_results: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     """
-    Sends search results to Groq Llama-3.3-70b-versatile to extract B2B leads based STRICTLY on the search data.
+    Sends search results to Groq to extract B2B leads based STRICTLY on the search data.
     """
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise ValueError("GROQ_API_KEY is not defined in the environment.")
+
+    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
     if not search_results:
         return []
@@ -75,7 +77,7 @@ JSON Output Format:
             "Content-Type": "application/json"
         }
         payload = {
-            "model": "llama-3.3-70b-versatile",
+            "model": model,
             "messages": [
                 {
                     "role": "system",

@@ -13,11 +13,13 @@ async def analyze_product(
     description: str = "Not Specified"
 ) -> Dict[str, Any]:
     """
-    Analyzes the product using Groq Llama-3.3-70b-versatile to extract keywords, industries, competitors, and buyer types.
+    Analyzes the product using Groq to extract keywords, industries, competitors, and buyer types.
     """
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise ValueError("GROQ_API_KEY is not defined in the environment.")
+
+    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
     prompt = f"""Act as an expert B2B product researcher and market analyst specializing in the Middle East / GCC market.
 Analyze the following product/service details to help us find high-quality sales leads:
@@ -58,7 +60,7 @@ JSON format:
             "Content-Type": "application/json"
         }
         payload = {
-            "model": "llama-3.3-70b-versatile",
+            "model": model,
             "messages": [
                 {
                     "role": "system",
