@@ -1,29 +1,67 @@
 import os
 import json
 import logging
+import httpx
+from urllib.parse import urlparse
 from typing import List, Dict, Any
-from anthropic import AsyncAnthropic
 
 logger = logging.getLogger(__name__)
 
+def get_domain(url: str) -> str:
+    """
+    Extracts the unique domain name from a URL to identify different companies.
+    """
+    if not url:
+        return ""
+    url = url.strip().lower()
+    if not url.startswith(("http://", "https://")):
+        url = "http://" + url
+    try:
+        parsed = urlparse(url)
+        netloc = parsed.netloc or ""
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        return netloc
+    except Exception:
+        return ""
+
 async def extract_leads(search_results: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     """
-    Sends search results to Claude to extract B2B leads based STRICTLY on the search data.
+    Sends search results to Claude or Groq to extract B2B leads based STRICTLY on the search data.
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY is not defined in the environment.")
-
     if not search_results:
         return []
 
-    # Format search results for the Claude prompt
+    # 1. Deduplicate by domain and truncate snippets to prevent payload limits
+    seen_domains = set()
+    unique_results = []
+    
+    for res in search_results:
+        url = res.get("url") or ""
+        domain = get_domain(url)
+        if not domain:
+            continue
+        if domain not in seen_domains:
+            seen_domains.add(domain)
+            snippet = res.get("snippet") or ""
+            if len(snippet) > 400:
+                snippet = snippet[:400] + "..."
+            unique_results.append({
+                "title": res.get("title") or "",
+                "url": url,
+                "snippet": snippet
+            })
+
+    # Limit to top 25 unique companies
+    unique_results = unique_results[:25]
+
+    # Format search results for the prompt
     formatted_results = []
-    for index, res in enumerate(search_results):
-        formatted_results.append(f"""[Search Result #{index + 1}]
-Title: {res.get('title') or ''}
-URL: {res.get('url') or ''}
-Snippet: {res.get('snippet') or ''}""")
+    for index, res in enumerate(unique_results):
+        formatted_results.append(f"""[Result #{index + 1}]
+Title: {res['title']}
+URL: {res['url']}
+Snippet: {res['snippet']}""")
 
     formatted_text = "\n\n".join(formatted_results)
 
@@ -69,24 +107,67 @@ JSON Output Format:
   ]
 }}"""
 
-    client = AsyncAnthropic(api_key=api_key)
+    provider = os.getenv("AI_PROVIDER", "claude").lower()
+    text = ""
 
     try:
-        response = await client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=4000,
-            system="You are a precise data-extraction assistant. You only output valid JSON based strictly on the provided context.",
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-        )
+        if provider == "groq":
+            api_key = os.getenv("GROQ_API_KEY")
+            if not api_key:
+                raise ValueError("GROQ_API_KEY is not defined in the environment.")
+            model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a precise data-extraction assistant. You only output valid JSON based strictly on the provided context."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "temperature": 0.2,
+                "max_tokens": 4096
+            }
 
-        text = ""
-        if response.content and len(response.content) > 0:
-            text = response.content[0].text.strip()
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                response = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json=payload
+                )
+                response.raise_for_status()
+                res_data = response.json()
+                if "choices" in res_data and len(res_data["choices"]) > 0:
+                    text = res_data["choices"][0]["message"]["content"].strip()
+        else:
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                raise ValueError("ANTHROPIC_API_KEY is not defined in the environment.")
+            
+            from anthropic import AsyncAnthropic
+            client = AsyncAnthropic(api_key=api_key)
+            
+            response = await client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=4000,
+                system="You are a precise data-extraction assistant. You only output valid JSON based strictly on the provided context.",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+            )
+            if response.content and len(response.content) > 0:
+                text = response.content[0].text.strip()
 
         if not text:
             return []
@@ -106,5 +187,5 @@ JSON Output Format:
             
         return []
     except Exception as e:
-        logger.error(f"Error extracting leads using Claude service: {e}")
+        logger.error(f"Error extracting leads using {provider.upper()} service: {e}")
         raise e

@@ -1,8 +1,8 @@
 import os
 import json
 import logging
+import httpx
 from typing import Dict, Any, List
-from anthropic import Anthropic
 
 logger = logging.getLogger(__name__)
 
@@ -13,17 +13,10 @@ async def analyze_product(
     description: str = "Not Specified"
 ) -> Dict[str, Any]:
     """
-    Analyzes the product using Claude Haiku 4.5 to extract keywords, industries, competitors, and buyer types.
+    Analyzes the product using Claude or Groq to extract keywords, industries, competitors, and buyer types.
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY is not defined in the environment.")
-
-    # Initialize client (uses httpx under the hood, synchronous client is standard, or AsyncAnthropic can be used)
-    # Since we are inside an async function, let's use AsyncAnthropic for non-blocking I/O!
-    from anthropic import AsyncAnthropic
-    client = AsyncAnthropic(api_key=api_key)
-
+    provider = os.getenv("AI_PROVIDER", "claude").lower()
+    
     prompt = f"""Act as an expert B2B product researcher and market analyst specializing in the Middle East / GCC market.
 Analyze the following product/service details to help us find high-quality sales leads:
 
@@ -57,25 +50,68 @@ JSON format:
   "alternativeSearchTerms": ["Alternative Term 1", "Alternative Term 2"]
 }}"""
 
+    text = ""
     try:
-        response = await client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=2000,
-            system="You are a precise B2B market intelligence data extraction assistant. You only output valid raw JSON.",
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-        )
-
-        text = ""
-        if response.content and len(response.content) > 0:
-            text = response.content[0].text.strip()
+        if provider == "groq":
+            api_key = os.getenv("GROQ_API_KEY")
+            if not api_key:
+                raise ValueError("GROQ_API_KEY is not defined in the environment.")
+            model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a precise B2B market intelligence data extraction assistant. You only output valid raw JSON."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "temperature": 0.2,
+                "max_tokens": 2048
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json=payload
+                )
+                response.raise_for_status()
+                res_data = response.json()
+                if "choices" in res_data and len(res_data["choices"]) > 0:
+                    text = res_data["choices"][0]["message"]["content"].strip()
+        else:
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                raise ValueError("ANTHROPIC_API_KEY is not defined in the environment.")
+            
+            from anthropic import AsyncAnthropic
+            client = AsyncAnthropic(api_key=api_key)
+            
+            response = await client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=2000,
+                system="You are a precise B2B market intelligence data extraction assistant. You only output valid raw JSON.",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+            )
+            if response.content and len(response.content) > 0:
+                text = response.content[0].text.strip()
 
         if not text:
-            raise ValueError("Empty response from Anthropic Claude API")
+            raise ValueError(f"Empty response from {provider.upper()} API")
 
         # Clean markdown code block wraps if present
         if text.startswith("```json"):
@@ -89,5 +125,5 @@ JSON format:
         parsed = json.loads(text)
         return parsed
     except Exception as e:
-        logger.error(f"Error in product analyzer service: {e}")
+        logger.error(f"Error in product analyzer service using {provider.upper()}: {e}")
         raise e

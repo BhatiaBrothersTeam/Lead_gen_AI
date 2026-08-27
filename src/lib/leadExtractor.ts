@@ -1,9 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { Groq } from "groq-sdk";
 import { SearchResult } from "./searchService";
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "",
-});
 
 export interface ExtractedLead {
   company: string;
@@ -20,19 +17,16 @@ export interface ExtractedLead {
 }
 
 /**
- * Sends search results to Claude to extract B2B leads based STRICTLY on the search data.
+ * Sends search results to Claude or Groq to extract B2B leads based STRICTLY on the search data.
  */
 export async function extractLeads(searchResults: SearchResult[]): Promise<ExtractedLead[]> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY is not defined in the environment.");
-  }
+  const provider = process.env.AI_PROVIDER || "claude";
 
   if (searchResults.length === 0) {
     return [];
   }
 
-  // Format search results to send to Claude
+  // Format search results to send to prompt
   const formattedResults = searchResults
     .map((res, index) => {
       return `[Search Result #${index + 1}]
@@ -83,7 +77,37 @@ JSON Output Format:
   ]
 }`;
 
-  try {
+  let text = "";
+  if (provider === "groq") {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      throw new Error("GROQ_API_KEY is not defined in the environment.");
+    }
+    const groq = new Groq({ apiKey, dangerouslyAllowBrowser: true });
+    const modelName = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+
+    const response = await groq.chat.completions.create({
+      model: modelName,
+      messages: [
+        {
+          role: "system",
+          content: "You are a precise data-extraction assistant. You only output valid JSON based strictly on the provided context."
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      max_tokens: 4096
+    });
+    text = response.choices[0]?.message?.content?.trim() || "";
+  } else {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new Error("ANTHROPIC_API_KEY is not defined in the environment.");
+    }
+    const anthropic = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5",
       max_tokens: 4000,
@@ -95,31 +119,28 @@ JSON Output Format:
         },
       ],
     });
-
-    let text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
-    if (!text) {
-      return [];
-    }
-
-    // Strip markdown code block wrappers if present
-    if (text.startsWith("```json")) {
-      text = text.substring(7);
-    } else if (text.startsWith("```")) {
-      text = text.substring(3);
-    }
-    if (text.endsWith("```")) {
-      text = text.substring(0, text.length - 3);
-    }
-    text = text.trim();
-
-    const parsed = JSON.parse(text);
-    if (parsed.leads && Array.isArray(parsed.leads)) {
-      return parsed.leads;
-    }
-    
-    return [];
-  } catch (error) {
-    console.error("Error extracting leads using Claude:", error);
-    throw error;
+    text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
   }
+
+  if (!text) {
+    return [];
+  }
+
+  // Strip markdown code block wrappers if present
+  if (text.startsWith("```json")) {
+    text = text.substring(7);
+  } else if (text.startsWith("```")) {
+    text = text.substring(3);
+  }
+  if (text.endsWith("```")) {
+    text = text.substring(0, text.length - 3);
+  }
+  text = text.trim();
+
+  const parsed = JSON.parse(text);
+  if (parsed.leads && Array.isArray(parsed.leads)) {
+    return parsed.leads;
+  }
+  
+  return [];
 }

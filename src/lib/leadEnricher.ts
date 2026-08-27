@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { Groq } from "groq-sdk";
 import { SerperSearchProvider } from "./searchService";
 import { ExtractedLead } from "./leadExtractor";
 
@@ -9,16 +10,18 @@ export async function enrichLeads(
   leads: ExtractedLead[],
   progressCallback?: (msg: string) => void
 ): Promise<ExtractedLead[]> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const provider = process.env.AI_PROVIDER || "claude";
+  const apiKey = provider === "groq" ? process.env.GROQ_API_KEY : process.env.ANTHROPIC_API_KEY;
   const serperKey = process.env.SERPER_API_KEY;
 
   if (!apiKey || !serperKey) {
-    console.warn("ANTHROPIC_API_KEY or SERPER_API_KEY environment variable is not defined. Skipping lead enrichment.");
+    console.warn(`${provider.toUpperCase()}_API_KEY or SERPER_API_KEY environment variable is not defined. Skipping lead enrichment.`);
     return leads;
   }
 
   const searchProvider = new SerperSearchProvider(serperKey);
-  const anthropic = new Anthropic({ apiKey });
+  const groq = provider === "groq" ? new Groq({ apiKey, dangerouslyAllowBrowser: true }) : null;
+  const anthropic = provider === "claude" ? new Anthropic({ apiKey, dangerouslyAllowBrowser: true }) : null;
 
   const enrichedLeads: ExtractedLead[] = [];
   const batchSize = 3; // Keep batch size small to avoid overloading rate limits and stay highly responsive
@@ -88,19 +91,39 @@ JSON Output Format:
 }
 `;
 
-        const response = await anthropic.messages.create({
-          model: "claude-haiku-4-5",
-          max_tokens: 1000,
-          system: "You are a precise data-enrichment assistant. You only output valid JSON based strictly on the provided context.",
-          messages: [
-            {
-              role: "user",
-              content: prompt,
-            },
-          ],
-        });
+        let text = "";
+        if (provider === "groq" && groq) {
+          const modelName = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+          const response = await groq.chat.completions.create({
+            model: modelName,
+            messages: [
+              {
+                role: "system",
+                content: "You are a precise data-enrichment assistant. You only output valid JSON based strictly on the provided context."
+              },
+              {
+                role: "user",
+                content: prompt,
+              },
+            ],
+            response_format: { type: "json_object" },
+          });
+          text = response.choices[0]?.message?.content?.trim() || "";
+        } else if (provider === "claude" && anthropic) {
+          const response = await anthropic.messages.create({
+            model: "claude-haiku-4-5",
+            max_tokens: 1000,
+            system: "You are a precise data-enrichment assistant. You only output valid JSON based strictly on the provided context.",
+            messages: [
+              {
+                role: "user",
+                content: prompt,
+              },
+            ],
+          });
+          text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
+        }
 
-        let text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
         if (!text) return lead;
 
         // Strip markdown code block wrappers

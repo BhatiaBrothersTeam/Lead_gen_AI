@@ -1,9 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-
-// Initialize Anthropic client using the key from process.env
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "",
-});
+import { Groq } from "groq-sdk";
 
 export interface ProductAnalysisInput {
   division: string;
@@ -25,13 +21,10 @@ export interface ProductAnalysisResult {
 }
 
 /**
- * Analyzes the product input using Claude to identify industries, buyer types, competitors, and keywords.
+ * Analyzes the product input using Claude or Groq to identify industries, buyer types, competitors, and keywords.
  */
 export async function analyzeProduct(input: ProductAnalysisInput): Promise<ProductAnalysisResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY is not defined in the environment.");
-  }
+  const provider = process.env.AI_PROVIDER || "claude";
 
   const prompt = `Act as an expert B2B product researcher and market analyst specializing in the Middle East / GCC market.
 Analyze the following product/service details to help us find high-quality sales leads:
@@ -66,7 +59,38 @@ JSON format:
   "alternativeSearchTerms": ["Alternative Term 1", "Alternative Term 2"]
 }`;
 
-  try {
+  let text = "";
+  if (provider === "groq") {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      throw new Error("GROQ_API_KEY is not defined in the environment.");
+    }
+    const groq = new Groq({ apiKey, dangerouslyAllowBrowser: true });
+    const modelName = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+
+    const response = await groq.chat.completions.create({
+      model: modelName,
+      messages: [
+        {
+          role: "system",
+          content: "You are a precise B2B market intelligence data extraction assistant. You only output valid raw JSON."
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 2048
+    });
+    text = response.choices[0]?.message?.content?.trim() || "";
+  } else {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new Error("ANTHROPIC_API_KEY is not defined in the environment.");
+    }
+    const anthropic = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5",
       max_tokens: 2000,
@@ -78,28 +102,25 @@ JSON format:
         },
       ],
     });
-
-    let text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
-    if (!text) {
-      throw new Error("Empty response from Anthropic Claude API");
-    }
-
-    // Strip markdown code block wrappers if present
-    if (text.startsWith("```json")) {
-      text = text.substring(7);
-    } else if (text.startsWith("```")) {
-      text = text.substring(3);
-    }
-    if (text.endsWith("```")) {
-      text = text.substring(0, text.length - 3);
-    }
-    text = text.trim();
-
-    // Parse the JSON output
-    const parsed: ProductAnalysisResult = JSON.parse(text);
-    return parsed;
-  } catch (error) {
-    console.error("Error in product analyzer:", error);
-    throw error;
+    text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
   }
+
+  if (!text) {
+    throw new Error(`Empty response from ${provider.toUpperCase()} API`);
+  }
+
+  // Strip markdown code block wrappers if present
+  if (text.startsWith("```json")) {
+    text = text.substring(7);
+  } else if (text.startsWith("```")) {
+    text = text.substring(3);
+  }
+  if (text.endsWith("```")) {
+    text = text.substring(0, text.length - 3);
+  }
+  text = text.trim();
+
+  // Parse the JSON output
+  const parsed: ProductAnalysisResult = JSON.parse(text);
+  return parsed;
 }
