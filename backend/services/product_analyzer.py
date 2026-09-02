@@ -3,6 +3,7 @@ import json
 import logging
 import httpx
 from typing import Dict, Any, List
+from anthropic import AsyncAnthropic
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,6 @@ JSON format:
             if not api_key:
                 raise ValueError("ANTHROPIC_API_KEY is not defined in the environment.")
             
-            from anthropic import AsyncAnthropic
             client = AsyncAnthropic(api_key=api_key)
             
             response = await client.messages.create(
