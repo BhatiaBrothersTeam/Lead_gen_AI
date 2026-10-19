@@ -473,6 +473,7 @@ export default function App() {
       name: lead.name || "",
       title: lead.title || "",
       company: lead.company || "",
+      division: lead.division || "Not Specified",
       email: lead.email || "",
       phone: lead.phone || "",
       location: lead.location || "",
@@ -484,7 +485,7 @@ export default function App() {
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(cleanedLeads, {
-      header: ["srNo", "name", "title", "company", "email", "phone", "location", "website", "linkedIn", "segment", "priority", "channel"]
+      header: ["srNo", "name", "title", "company", "division", "email", "phone", "location", "website", "linkedIn", "segment", "priority", "channel"]
     });
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Leads");

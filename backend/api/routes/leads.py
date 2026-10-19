@@ -128,7 +128,7 @@ async def generate_leads(input_data: GenerateLeadsInput):
         try:
             product_name = input_data.productName
             brand = input_data.brand
-            division = input_data.division
+            division = (input_data.division or "").strip() or "Not Specified"
             description = input_data.description
 
             if not product_name or product_name.strip() == "":
@@ -228,6 +228,8 @@ async def generate_leads(input_data: GenerateLeadsInput):
             # Step 6: Save to database (Upserts & partial field matching)
             yield make_event("saving", "Saving Leads...")
             try:
+                for lead in validated_leads:
+                    lead["division"] = division
                 db_result = await db_service.save_or_update_leads(validated_leads)
                 logger.info(f"Database save completed: {db_result}")
             except Exception as e:

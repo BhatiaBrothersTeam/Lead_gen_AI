@@ -37,6 +37,7 @@ async def initialize_tables():
                 segment text,
                 priority text,
                 channel text,
+                division text NOT NULL DEFAULT 'Not Specified',
                 created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
                 verified boolean DEFAULT true
             )
@@ -46,6 +47,8 @@ async def initialize_tables():
         cols = await conn.fetch("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='leads'")
         col_names = {r["column_name"] for r in cols}
         
+        if "division" not in col_names:
+            await conn.execute("ALTER TABLE public.leads ADD COLUMN division text NOT NULL DEFAULT 'Not Specified'")
         if "email_sent" not in col_names:
             await conn.execute("ALTER TABLE public.leads ADD COLUMN email_sent boolean DEFAULT false")
         if "email_sent_date" not in col_names:
@@ -138,29 +141,31 @@ async def filter_existing_leads(leads: List[Dict[str, Any]]) -> List[Dict[str, A
         pool = await get_pool()
         async with pool.acquire() as conn:
             query = """
-                SELECT email, phone, linkedin FROM public.leads 
+                SELECT email, phone, linkedin, division FROM public.leads
                 WHERE email = ANY($1::text[]) 
                    OR phone = ANY($2::text[]) 
                    OR linkedin = ANY($3::text[])
             """
             rows = await conn.fetch(query, incoming_emails, incoming_phones, incoming_linkedin)
             for r in rows:
+                division = (r["division"] or "").strip().lower() or "not specified"
                 if r["email"]:
-                    existing_emails.add(r["email"].lower())
+                    existing_emails.add((r["email"].lower(), division))
                 if r["phone"]:
-                    existing_phones.add(r["phone"].strip())
+                    existing_phones.add((r["phone"].strip(), division))
                 if r["linkedin"]:
-                    existing_linkedin.add(r["linkedin"].lower())
+                    existing_linkedin.add((r["linkedin"].lower(), division))
 
     unique_leads = []
     for l in leads:
         email = (l.get("email") or "").strip().lower()
         phone = (l.get("phone") or "").strip()
         li = (l.get("linkedIn") or l.get("linkedin") or "").strip().lower()
+        division = (l.get("division") or "").strip().lower() or "not specified"
 
-        has_email = email and email in existing_emails
-        has_phone = phone and phone in existing_phones
-        has_linkedin = li and li in existing_linkedin
+        has_email = email and (email, division) in existing_emails
+        has_phone = phone and (phone, division) in existing_phones
+        has_linkedin = li and (li, division) in existing_linkedin
 
         if not (has_email or has_phone or has_linkedin):
             unique_leads.append(l)
@@ -189,14 +194,15 @@ async def save_leads_directly(leads: List[Dict[str, Any]]) -> Dict[str, Any]:
                 segment text,
                 priority text,
                 channel text,
+                division text NOT NULL DEFAULT 'Not Specified',
                 created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
                 verified boolean DEFAULT true
             )
         """)
 
         query = """
-            INSERT INTO public.leads(name, title, company, email, phone, website, location, linkedin, segment, priority, channel, verified) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
+            INSERT INTO public.leads(name, title, company, email, phone, website, location, linkedin, segment, priority, channel, division, verified)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true)
             RETURNING *
         """
         processed_leads = []
@@ -213,7 +219,8 @@ async def save_leads_directly(leads: List[Dict[str, Any]]) -> Dict[str, Any]:
                 lead.get("linkedIn") or lead.get("linkedin"),
                 lead.get("segment"),
                 lead.get("priority"),
-                lead.get("channel")
+                lead.get("channel"),
+                (lead.get("division") or "").strip() or "Not Specified"
             )
             processed_leads.append(serialize_db_lead(dict(row)))
             
@@ -247,6 +254,7 @@ async def save_or_update_leads(leads: List[Dict[str, Any]]) -> Dict[str, Any]:
                 segment text,
                 priority text,
                 channel text,
+                division text NOT NULL DEFAULT 'Not Specified',
                 created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
                 verified boolean DEFAULT true
             )
@@ -259,6 +267,7 @@ async def save_or_update_leads(leads: List[Dict[str, Any]]) -> Dict[str, Any]:
             company = lead.get("company")
             email = lead.get("email")
             website = lead.get("website")
+            division = (lead.get("division") or "").strip() or "Not Specified"
 
             if company and company.strip() != "":
                 params.append(company.strip())
@@ -272,7 +281,8 @@ async def save_or_update_leads(leads: List[Dict[str, Any]]) -> Dict[str, Any]:
 
             existing_record = None
             if match_conditions:
-                check_query = f"SELECT * FROM public.leads WHERE {' OR '.join(match_conditions)} LIMIT 1"
+                params.append(division)
+                check_query = f"SELECT * FROM public.leads WHERE ({' OR '.join(match_conditions)}) AND LOWER(division) = LOWER(${len(params)}) LIMIT 1"
                 try:
                     existing_record = await conn.fetchrow(check_query, *params)
                 except Exception as err:
@@ -336,8 +346,8 @@ async def save_or_update_leads(leads: List[Dict[str, Any]]) -> Dict[str, Any]:
             else:
                 # No duplicate, insert new
                 insert_query = """
-                    INSERT INTO public.leads (name, title, company, email, phone, website, location, linkedin, segment, priority, channel, verified)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
+                    INSERT INTO public.leads (name, title, company, email, phone, website, location, linkedin, segment, priority, channel, division, verified)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true)
                     RETURNING *
                 """
                 try:
@@ -354,6 +364,7 @@ async def save_or_update_leads(leads: List[Dict[str, Any]]) -> Dict[str, Any]:
                         lead.get("segment") or "",
                         lead.get("priority") or "",
                         lead.get("channel") or "",
+                        division,
                     )
                     new_leads_added += 1
                     processed_leads.append(serialize_db_lead(dict(inserted_row)))

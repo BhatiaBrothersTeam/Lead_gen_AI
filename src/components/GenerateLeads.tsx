@@ -527,6 +527,7 @@ export function GenerateLeads({ leads, setLeads, selectedLeads, setSelectedLeads
         const matches = (
           (lead.name || "").toLowerCase().includes(query) ||
           (lead.company || "").toLowerCase().includes(query) ||
+          (lead.division || "Not Specified").toLowerCase().includes(query) ||
           (lead.email || "").toLowerCase().includes(query) ||
           (lead.location || "").toLowerCase().includes(query)
         );
@@ -1028,6 +1029,7 @@ export function GenerateLeads({ leads, setLeads, selectedLeads, setSelectedLeads
                         <th className="px-3 py-3 text-[#5A5A6D]">Name</th>
                         <th className="px-3 py-3 text-[#5A5A6D] hidden md:table-cell">Title</th>
                         <th className="px-3 py-3 text-[#5A5A6D]">Company</th>
+                        <th className="px-3 py-3 text-[#5A5A6D]">Division</th>
                         <th className="px-3 py-3 text-[#5A5A6D] hidden lg:table-cell">Email</th>
                         <th className="px-3 py-3 text-[#5A5A6D] hidden xl:table-cell">Website</th>
                         <th className="px-3 py-3 text-[#5A5A6D] hidden xl:table-cell">LinkedIn</th>
@@ -1067,6 +1069,7 @@ export function GenerateLeads({ leads, setLeads, selectedLeads, setSelectedLeads
                                 <Building2 className="w-3.5 h-3.5 text-[#A0A0B2]" /> {lead.company}
                               </div>
                             </td>
+                            <td className="px-3 py-3 text-[#5A5A6D] whitespace-nowrap">{lead.division || "Not Specified"}</td>
                             <td className="px-3 py-3 text-[#5A5A6D] hidden lg:table-cell hover:text-[#6B2BFF] transition-colors" onClick={(e) => e.stopPropagation()}>
                               <a href={`mailto:${lead.email}`}>{lead.email}</a>
                             </td>
@@ -1270,6 +1273,10 @@ export function GenerateLeads({ leads, setLeads, selectedLeads, setSelectedLeads
                             <h3 className="text-[11px] font-bold text-[#8A8AA3] uppercase tracking-wider mb-3">Classification</h3>
                             <div className="bg-[#FAFAFC] border border-[#E5E5EB] rounded-xl overflow-hidden divide-y divide-[#E5E5EB]">
                               <div className="flex items-center px-4 py-3">
+                                <span className="text-[13px] font-medium text-[#7A7A8F] w-24 shrink-0">Division</span>
+                                <span className="text-[14px] font-medium text-[#111118] min-w-0 break-words">{selectedLeadData.division || "Not Specified"}</span>
+                              </div>
+                              <div className="flex items-center px-4 py-3">
                                 <span className="text-[13px] font-medium text-[#7A7A8F] w-24 shrink-0">Segment</span>
                                 <span className={`px-2 py-0.5 rounded-[4px] text-[12px] font-bold border ${badgeStyles.segment[selectedLeadData.segment as keyof typeof badgeStyles.segment] || "bg-slate-50 text-slate-600 border-slate-100"}`}>{selectedLeadData.segment || 'Unknown'}</span>
                               </div>
@@ -1318,6 +1325,7 @@ export function GenerateLeads({ leads, setLeads, selectedLeads, setSelectedLeads
                         </div>
                         <h3 className="text-[16px] font-bold text-[#111118] line-clamp-1 group-hover:text-[#6B2BFF] transition-colors relative z-10">{lead.name}</h3>
                         <p className="text-[13px] font-medium text-[#7A7A8F] mb-5 line-clamp-1 relative z-10">{lead.title}</p>
+                        <p className="text-[12px] font-medium text-[#5A5A6D] mb-3 break-words relative z-10">Division: {lead.division || "Not Specified"}</p>
 
                         <div className="bg-[#FAFAFC]/80 backdrop-blur-sm rounded-xl p-3 border border-[#E5E5EB]/60 mb-5 relative z-10">
                           <div className="flex items-center gap-2 text-[12px] font-medium text-[#111118] mb-2 line-clamp-1">

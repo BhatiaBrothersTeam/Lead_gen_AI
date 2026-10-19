@@ -19,6 +19,7 @@ export interface Lead {
   segment: string;
   priority: string;
   channel: string;
+  division?: string;
 }
 
 export async function generateLeads(

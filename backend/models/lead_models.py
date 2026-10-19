@@ -15,6 +15,7 @@ class Lead(BaseModel):
     segment: Optional[str] = Field(default="")
     priority: Optional[str] = Field(default="")
     channel: Optional[str] = Field(default="")
+    division: Optional[str] = Field(default="Not Specified")
     email_sent: Optional[bool] = Field(default=False)
     email_sent_date: Optional[str] = Field(default=None)
     email_status: Optional[str] = Field(default=None)

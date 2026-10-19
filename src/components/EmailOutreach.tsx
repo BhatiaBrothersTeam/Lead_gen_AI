@@ -108,6 +108,7 @@ export function EmailOutreach({ outreachLeads, setOutreachLeads, setActiveTab, l
                         <h3 className="font-bold text-[#111118] text-[15px] truncate">{lead.name || 'Unknown'}</h3>
                         <p className="text-[12px] text-[#7A7A8F] font-medium truncate">{lead.title}</p>
                         <p className="text-[12px] font-semibold text-[#111118] truncate mt-0.5">{lead.company}</p>
+                        <p className="text-[12px] text-[#7A7A8F] font-medium break-words mt-0.5">Division: {lead.division || "Not Specified"}</p>
                       </div>
                     </div>
 
