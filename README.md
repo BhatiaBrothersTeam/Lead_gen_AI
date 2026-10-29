@@ -1,41 +1,13 @@
-# Lead Division Tracking
-
-Each generated lead stores the division from the generation request. Manual
-generation uses the selected division, dropdown generation uses `ISD`, and file
-generation uses `Auto Division`.
-
-## Database Migration
-
-Run this against the existing PostgreSQL database before deploying the updated
-application, or restart the backend to let its schema initialization add it:
-
-```sql
-ALTER TABLE public.leads
-ADD COLUMN IF NOT EXISTS division text NOT NULL DEFAULT 'Not Specified';
-```
-
-`Not Specified` is the recommended default: existing records have no recorded
-division, and an omitted or blank division must not imply a real business unit.
-The migration fills existing rows with this value; it cannot reconstruct their
-original divisions. New generated leads use the request's division instead.
-
-Duplicate matching is case-insensitive and scoped to division. The same company
-can have separate lead records for different divisions; matching leads within
-one division still receive missing-field updates. Generating a previously
-unclassified company with a known division creates a separate record rather than
-assigning an unverified division to its historical record.
-
-Division is visible in lead tables, cards, details, and Excel outreach imports,
-and is included in Excel exports and generated-lead search.
-
 ## Access control (Staff Portal)
 
 Who may use this app, and what they may do in it, is managed in the Bhatia
 Brothers Staff Portal (`/dashboard/users` and `/dashboard/applications`), not
-here. Every API route checks the signed-in person's permission live with the
-portal (`backend/api/routes/access.py`, cached for at most 60 seconds; bulk
-email and page loads always ask fresh). If the portal can't be reached, access
-is refused. The UI hides features the person's role doesn't include.
+here. Users arrive from the portal through a one-time sign-in link
+(`/auth/sso`); there is no separate login. Every API route checks the
+signed-in person's permission live with the portal
+(`backend/api/routes/access.py`, cached for at most 60 seconds; bulk email and
+page loads always ask fresh). If the portal can't be reached, access is
+refused. The UI hides features the person's role doesn't include.
 
 | Permission | Routes |
 |---|---|
@@ -47,14 +19,25 @@ is refused. The UI hides features the person's role doesn't include.
 | `outreach.manage_templates` | create and delete templates |
 | `outreach.test_smtp` | SMTP connection test |
 
-It uses `STAFF_PORTAL_URL` and `ACTIVITY_LOG_API_KEY` (the same key as the
-activity log), and the portal must have its access-management migration
-applied.
+### Settings
 
-## Focused Checks
+Backend (e.g. Render environment variables; never in the frontend):
+
+| Variable | Value |
+|---|---|
+| `STAFF_PORTAL_URL` | the portal's public URL; access checks and the activity log go here |
+| `PORTAL_URL` | the same URL (allowed origin for the portal's "Sign out of all apps") |
+| `ACTIVITY_LOG_API_KEY` | this app's key from the portal's `/dashboard/api-keys` |
+| `JWT_SECRET` | equal to the portal's `JWT_SECRET` (verifies sign-in links) |
+| `SESSION_SECRET` | this app's own random secret, 32+ characters, different from `JWT_SECRET` |
+| `SESSION_COOKIE_SAMESITE` | `none` when the frontend and backend are on different sites (e.g. vercel.app and onrender.com); forces Secure |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | outgoing mail; email routes answer 503 without them |
+
+Frontend build: `PORTAL_URL` (where signed-out users are sent) and
+`VITE_API_URL` (the backend). Without the backend settings above, every API
+route refuses access.
 
 ```powershell
-.\venv\Scripts\python.exe -m unittest backend.test_lead_division backend.test_access_control -v
+.\venv\Scripts\python.exe -m unittest backend.test_lead_division backend.test_access_control backend.test_secret_exposure -v
 npm run lint
 ```
-
