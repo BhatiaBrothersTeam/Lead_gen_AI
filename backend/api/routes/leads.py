@@ -4,7 +4,7 @@ import logging
 import pandas as pd
 import asyncio
 from typing import Optional, List
-from fastapi import APIRouter, File, UploadFile, HTTPException, Query
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from backend.models.lead_models import (
@@ -16,12 +16,51 @@ from backend.services.company_discovery import discover_companies
 from backend.services.lead_extractor import extract_leads
 from backend.services.lead_enricher import enrich_leads
 from backend.services.lead_validator import validate_leads
-from backend.services.email_service import verify_smtp_connection, send_email
+from backend.services.email_service import verify_smtp_connection, send_email, smtp_configured
+from backend.services.activity_log import log_activity
+from backend.api.routes.auth import session_user_id
+from backend.api.routes.access import require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-@router.get("/api/product-service-types")
+# Every route needs a Lead Gen permission from the Staff Portal's access
+# registry (401 without a session, 403 without the permission). The keys match
+# the permissions the portal seeds for "LGA"; roles are mapped to them there.
+LEADS_GENERATE = Depends(require_permission("leads.generate"))
+LEADS_SAVE = Depends(require_permission("leads.save"))
+SEND_EMAIL = Depends(require_permission("outreach.send_email"))
+# Bulk email is the most sensitive action, so it always asks the portal fresh.
+SEND_BULK = Depends(require_permission("outreach.send_bulk", fresh=True))
+MANAGE_TEMPLATES = Depends(require_permission("outreach.manage_templates"))
+TEST_SMTP = Depends(require_permission("outreach.test_smtp"))
+
+# How many lead ids to keep in one activity-log entry's metadata.
+MAX_LOGGED_IDS = 100
+
+
+def _require_smtp() -> None:
+    """503 instead of a send attempt when the SMTP credentials aren't set."""
+    if not smtp_configured():
+        raise HTTPException(status_code=503, detail="SMTP not configured")
+
+
+def _log_activity(request: Request, action: str, **kwargs) -> None:
+    """
+    Reports a user action to the Staff Portal's activity log, attributed to the
+    SSO-signed-in user. Fire-and-forget: never blocks or fails the endpoint.
+    See backend/services/activity_log.py.
+    """
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    log_activity(
+        session_user_id(request) or "anonymous",
+        action,
+        ip_address=forwarded or (request.client.host if request.client else None),
+        user_agent=request.headers.get("user-agent"),
+        **kwargs,
+    )
+
+@router.get("/api/product-service-types", dependencies=[LEADS_GENERATE])
 async def get_product_service_types(category: Optional[str] = Query(None)):
     """
     Returns product service types optionally filtered by category.
@@ -34,7 +73,7 @@ async def get_product_service_types(category: Optional[str] = Query(None)):
         raise HTTPException(status_code=500, detail="Failed to fetch types")
 
 
-@router.get("/api/product-service-names")
+@router.get("/api/product-service-names", dependencies=[LEADS_GENERATE])
 async def get_product_service_names(typeId: int, category: str):
     """
     Returns product service names for a given type and category.
@@ -47,8 +86,8 @@ async def get_product_service_names(typeId: int, category: str):
         raise HTTPException(status_code=500, detail="Failed to fetch names")
 
 
-@router.post("/api/upload-file")
-async def upload_file(file: UploadFile = File(...)):
+@router.post("/api/upload-file", dependencies=[LEADS_GENERATE])
+async def upload_file(request: Request, file: UploadFile = File(...)):
     """
     Uploads and parses an Excel file containing product listings.
     """
@@ -79,14 +118,20 @@ async def upload_file(file: UploadFile = File(...)):
                     "sku": sku,
                     "brand": brand
                 })
-                
+
+        _log_activity(
+            request,
+            "products.imported",
+            entity_type="product_file",
+            metadata={"fileName": file.filename, "products": len(products)},
+        )
         return {"products": products}
     except Exception as e:
         logger.error(f"Error processing uploaded file: {e}")
         raise HTTPException(status_code=500, detail="Failed to process Excel file")
 
 
-@router.post("/api/filter-existing-leads")
+@router.post("/api/filter-existing-leads", dependencies=[LEADS_SAVE])
 async def filter_existing_leads(request: LeadsRequest):
     """
     Filters out leads that already exist in the database.
@@ -101,8 +146,8 @@ async def filter_existing_leads(request: LeadsRequest):
         raise HTTPException(status_code=500, detail="Failed to filter leads")
 
 
-@router.post("/api/save-leads")
-async def save_leads(request: LeadsRequest):
+@router.post("/api/save-leads", dependencies=[LEADS_SAVE])
+async def save_leads(request: LeadsRequest, http_request: Request):
     """
     Saves a batch of leads directly into the database.
     """
@@ -110,14 +155,27 @@ async def save_leads(request: LeadsRequest):
         # Convert pydantic models to dictionaries
         leads_dict = [l.model_dump(by_alias=True) for l in request.leads]
         res = await db_service.save_leads_directly(leads_dict)
+
+        lead_ids = [l.get("id") for l in res.get("leads", []) if l.get("id") is not None]
+        _log_activity(
+            http_request,
+            "lead.created",
+            entity_type="lead",
+            entity_id=lead_ids[0] if len(lead_ids) == 1 else None,
+            metadata={
+                "count": len(lead_ids),
+                "leadIds": lead_ids[:MAX_LOGGED_IDS],
+                "divisions": sorted({(l.get("division") or "Not Specified") for l in leads_dict}),
+            },
+        )
         return res
     except Exception as e:
         logger.error(f"Error saving leads: {e}")
         raise HTTPException(status_code=500, detail="Failed to save leads")
 
 
-@router.post("/api/generate-leads")
-async def generate_leads(input_data: GenerateLeadsInput):
+@router.post("/api/generate-leads", dependencies=[LEADS_GENERATE])
+async def generate_leads(input_data: GenerateLeadsInput, request: Request):
     """
     Core pipeline generator using Server-Sent Events (SSE).
     """
@@ -237,6 +295,22 @@ async def generate_leads(input_data: GenerateLeadsInput):
                 yield make_event("error", f"Database save failed: {str(e)}")
                 return
 
+            # One entry per run (not per lead): new and updated leads are counted.
+            _log_activity(
+                request,
+                "leads.generated",
+                entity_type="lead",
+                metadata={
+                    "productName": product_name,
+                    "brand": brand,
+                    "division": division,
+                    "totalFound": db_result.get("totalFound") or 0,
+                    "newLeadsAdded": db_result.get("newLeadsAdded") or 0,
+                    "existingLeadsUpdated": db_result.get("existingLeadsUpdated") or 0,
+                    "duplicatesSkipped": db_result.get("duplicatesSkipped") or 0,
+                },
+            )
+
             # Yield final completion summary
             yield make_event(
                 "completed", 
@@ -257,34 +331,49 @@ async def generate_leads(input_data: GenerateLeadsInput):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-@router.post("/api/test-smtp")
+@router.post("/api/test-smtp", dependencies=[TEST_SMTP])
 async def test_smtp():
     """
-    Verify SMTP credentials and connect to smtp.gmail.com.
+    Verify SMTP credentials and connect to the SMTP server.
     """
+    _require_smtp()
     res = await verify_smtp_connection()
     return res
 
 
-@router.post("/api/send-email")
-async def send_single_email(req: SingleEmailRequest):
+@router.post("/api/send-email", dependencies=[SEND_EMAIL])
+async def send_single_email(req: SingleEmailRequest, request: Request):
     """
     Sends a single email and returns success status.
     """
+    _require_smtp()
     res = await send_email(req.email, req.subject, req.body)
     logger.info(f"Single email send to {req.email} result: {res}")
-            
+
+    # Only the recipient's domain goes to the central log, not the address.
+    _log_activity(
+        request,
+        "email.sent" if res["success"] else "email.failed",
+        entity_type="email",
+        metadata={
+            "subject": req.subject,
+            "recipientDomain": req.email.rsplit("@", 1)[-1] if "@" in req.email else None,
+        },
+    )
+
     if res["success"]:
         return {"success": True}
     else:
         return {"success": False, "error": res.get("error")}
 
 
-@router.post("/api/send-bulk-email")
-async def send_bulk_email_endpoint(req: BulkEmailRequest):
+@router.post("/api/send-bulk-email", dependencies=[SEND_BULK])
+async def send_bulk_email_endpoint(req: BulkEmailRequest, request: Request):
     """
     Triggers bulk outreach campaign, sending emails with a delay and streaming progress.
     """
+    _require_smtp()
+
     async def bulk_event_generator():
         def make_event(status: str, message: str, **kwargs):
             return f"data: {json.dumps({'status': status, 'message': message, **kwargs})}\n\n"
@@ -381,6 +470,18 @@ async def send_bulk_email_endpoint(req: BulkEmailRequest):
 
         # Final summary: "50 Emails Processed | 48 Sent | 2 Failed"
         summary_msg = f"{total_leads} Emails Processed | {sent_count} Sent | {failed_count} Failed"
+        _log_activity(
+            request,
+            "email.bulk_sent",
+            entity_type="lead",
+            metadata={
+                "subject": req.subject,
+                "total": total_leads,
+                "sent": sent_count,
+                "failed": failed_count,
+                "leadIds": (req.leadIds or [])[:MAX_LOGGED_IDS],
+            },
+        )
         yield make_event(
             "completed", 
             summary_msg, 
@@ -392,7 +493,7 @@ async def send_bulk_email_endpoint(req: BulkEmailRequest):
     return StreamingResponse(bulk_event_generator(), media_type="text/event-stream")
 
 
-@router.get("/api/email-templates")
+@router.get("/api/email-templates", dependencies=[SEND_EMAIL])
 async def get_templates():
     """
     Get all saved email templates.
@@ -405,8 +506,8 @@ async def get_templates():
         raise HTTPException(status_code=500, detail="Failed to fetch templates")
 
 
-@router.post("/api/email-templates")
-async def save_template(template: EmailTemplateSchema):
+@router.post("/api/email-templates", dependencies=[MANAGE_TEMPLATES])
+async def save_template(template: EmailTemplateSchema, request: Request):
     """
     Save or update an email template.
     """
@@ -417,19 +518,27 @@ async def save_template(template: EmailTemplateSchema):
             body=template.body,
             template_id=template.id
         )
+        _log_activity(
+            request,
+            "email_template.updated" if template.id else "email_template.created",
+            entity_type="email_template",
+            entity_id=saved["id"],
+            metadata={"name": template.template_name},
+        )
         return {"success": True, "template": saved}
     except Exception as e:
         logger.error(f"Failed to save template: {e}")
         raise HTTPException(status_code=500, detail="Failed to save template")
 
 
-@router.delete("/api/email-templates/{template_id}")
-async def delete_template(template_id: int):
+@router.delete("/api/email-templates/{template_id}", dependencies=[MANAGE_TEMPLATES])
+async def delete_template(template_id: int, request: Request):
     """
     Delete an email template.
     """
     try:
         await db_service.delete_email_template(template_id)
+        _log_activity(request, "email_template.deleted", entity_type="email_template", entity_id=template_id)
         return {"success": True}
     except Exception as e:
         logger.error(f"Failed to delete template: {e}")

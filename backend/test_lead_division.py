@@ -91,8 +91,9 @@ class LeadDivisionTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(routes, "enrich_leads", AsyncMock(return_value=[generated_lead])),
                     patch.object(routes, "validate_leads", return_value=[generated_lead]),
                     patch.object(database, "save_or_update_leads", save),
+                    patch.object(routes, "_log_activity"),  # the Staff Portal activity log isn't under test here
                 ):
-                    response = await routes.generate_leads(GenerateLeadsInput(productName="Pump", division=raw_division))
+                    response = await routes.generate_leads(GenerateLeadsInput(productName="Pump", division=raw_division), MagicMock())
                     events = [json.loads(chunk.removeprefix("data: ")) async for chunk in response.body_iterator]
                 save.assert_awaited_once_with([{"company": "Example", "division": expected}])
                 self.assertEqual(events[-1]["status"], "completed")

@@ -2,25 +2,37 @@ import os
 import smtplib
 import logging
 import asyncio
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 logger = logging.getLogger(__name__)
 
+
+class SmtpNotConfigured(RuntimeError):
+    """SMTP_USER / SMTP_PASSWORD are missing; routes answer 503."""
+
+
+def smtp_configured() -> bool:
+    return bool(os.getenv("SMTP_USER") and os.getenv("SMTP_PASSWORD"))
+
+
+def smtp_settings() -> Tuple[str, int, str, str]:
+    """
+    SMTP host, port, user and password from the environment. The credentials
+    have no defaults: set them in .env.local (see .env.example).
+    """
+    if not smtp_configured():
+        raise SmtpNotConfigured("SMTP not configured: set SMTP_USER and SMTP_PASSWORD")
+    host = os.getenv("SMTP_HOST") or "smtp.gmail.com"
+    port = int(os.getenv("SMTP_PORT") or "587")
+    return host, port, os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"]
+
+
 def _sync_verify_smtp() -> None:
-    host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    port = int(os.getenv("SMTP_PORT", "587"))
-    user = os.getenv("SMTP_USER", "ecommerce@vvsons.ae")
-    password = os.getenv("SMTP_PASSWORD", "ecvn wqbh bbur fwcg")
-    
-    if not user or not password:
-        raise ValueError("SMTP_USER and SMTP_PASSWORD environment variables are not set")
-    
-    # Mask password for logs
-    masked_pw = password[:2] + "*" * (len(password) - 4) + password[-2:] if len(password) > 4 else "****"
-    logger.info(f"Connecting to SMTP server {host}:{port} as {user} with password {masked_pw}")
-    
+    host, port, user, password = smtp_settings()
+    logger.info(f"Connecting to SMTP server {host}:{port} as {user}")
+
     server = smtplib.SMTP(host, port, timeout=10)
     try:
         server.ehlo()
@@ -47,15 +59,9 @@ async def verify_smtp_connection() -> Dict[str, Any]:
 
 
 def _sync_send_email(to_email: str, subject: str, text_body: str, html_body: Optional[str] = None) -> None:
-    host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    port = int(os.getenv("SMTP_PORT", "587"))
-    user = os.getenv("SMTP_USER", "ecommerce@vvsons.ae")
-    password = os.getenv("SMTP_PASSWORD", "ecvn wqbh bbur fwcg")
+    host, port, user, password = smtp_settings()
     from_email = os.getenv("SMTP_FROM", user)
-    
-    if not user or not password:
-        raise ValueError("SMTP_USER and SMTP_PASSWORD environment variables are not set")
-        
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = from_email

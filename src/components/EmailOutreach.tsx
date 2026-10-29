@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Mail, Upload, Send } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
+import { useCan } from "../auth/permissions";
 
 interface EmailOutreachProps {
   key?: React.Key;
@@ -19,6 +20,8 @@ interface EmailOutreachProps {
 
 export function EmailOutreach({ outreachLeads, setOutreachLeads, setActiveTab, leads, setLeads, openComposeModal, openBulkComposeModal, clearOutreachState }: EmailOutreachProps) {
   const outreachFileRef = useRef<HTMLInputElement>(null);
+  // Staff Portal permissions: hide what this person can't do (the API checks too).
+  const can = useCan();
 
   const handleOutreachUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -77,6 +80,7 @@ export function EmailOutreach({ outreachLeads, setOutreachLeads, setActiveTab, l
               <p className="text-[13px] text-[#7A7A8F] font-medium">Outreach emails are sent securely using FastAPI SMTP.</p>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
+              {can("outreach.send_bulk") && (
               <Button
                 onClick={() => {
                   const validLeads = outreachLeads.filter(l => l.email);
@@ -90,6 +94,7 @@ export function EmailOutreach({ outreachLeads, setOutreachLeads, setActiveTab, l
               >
                 <Send className="w-3.5 h-3.5 mr-2" /> Run Bulk Outreach
               </Button>
+              )}
               <Button variant="outline" onClick={() => clearOutreachState ? clearOutreachState() : setOutreachLeads([])} className="h-9 px-4 text-[13px] font-semibold border-[#E5E5EB] text-[#111118]">Clear Session</Button>
             </div>
           </div>
@@ -127,6 +132,7 @@ export function EmailOutreach({ outreachLeads, setOutreachLeads, setActiveTab, l
                       )}
                     </div>
 
+                    {can("outreach.send_email") && (
                     <div className="mt-auto">
                       <button
                         disabled={!lead.email}
@@ -140,6 +146,7 @@ export function EmailOutreach({ outreachLeads, setOutreachLeads, setActiveTab, l
                         <Send className="w-3.5 h-3.5" /> COMPOSE EMAIL
                       </button>
                     </div>
+                    )}
                   </div>
                 );
               })}

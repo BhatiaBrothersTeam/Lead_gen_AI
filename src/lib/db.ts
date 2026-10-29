@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { ExtractedLead } from "./leadExtractor";
+import { ExtractedLead } from "./types";
 
 // Create a pool using the DATABASE_URL environment variable
 export const pool = new Pool({

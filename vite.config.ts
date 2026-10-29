@@ -7,11 +7,11 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react(), tailwindcss()],
+    // Never define secrets here: everything in `define` is inlined into the
+    // browser bundle. AI provider keys live on the FastAPI backend only.
     define: {
-      'process.env.GROQ_API_KEY': JSON.stringify(env.GROQ_API_KEY),
-      'process.env.OPENAI_API_KEY': JSON.stringify(env.OPENAI_API_KEY),
-      'process.env.ANTHROPIC_API_KEY': JSON.stringify(env.ANTHROPIC_API_KEY),
-      'process.env.XAI_API_KEY': JSON.stringify(env.XAI_API_KEY),
+      // Staff Portal SSO: where to send users who aren't signed in there.
+      'process.env.PORTAL_URL': JSON.stringify(env.PORTAL_URL || 'http://localhost:3000'),
     },
     resolve: {
       alias: {
@@ -26,11 +26,6 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: 'http://localhost:8000',
           changeOrigin: true
-        },
-        '/xai-api': {
-          target: 'https://api.x.ai',
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/xai-api/, '')
         }
       }
     },

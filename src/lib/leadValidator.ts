@@ -1,4 +1,4 @@
-import { ExtractedLead } from "./leadExtractor";
+import { ExtractedLead } from "./types";
 
 /**
  * Validates a batch of extracted leads based on rules.

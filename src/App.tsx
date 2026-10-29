@@ -1,17 +1,85 @@
 import { useState, useEffect } from "react";
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
-import { type Lead } from "@/src/lib/groq";
+import { type Lead } from "@/src/lib/types";
 import { toast, Toaster } from "sonner";
 import {
   Loader2, Search, Mail, Command, Database, FolderDown, Sparkles, Settings,
-  Send, X, AlertCircle, Trash2, ChevronDown, Building2, MapPin, Linkedin, Phone, Globe, Copy, Menu
+  Send, X, AlertCircle, Trash2, ChevronDown, Building2, MapPin, Linkedin, Phone, Globe, Copy, Menu,
+  CheckCircle2, LogOut
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { GenerateLeads } from "./components/GenerateLeads";
 import { EmailOutreach } from "./components/EmailOutreach";
 import { API_BASE_URL } from "./apiConfig";
+import { PermissionsProvider } from "./auth/permissions";
+
+const PORTAL_URL = process.env.PORTAL_URL || "http://localhost:3000";
+
+type SsoUser = { name: string; role: string; permissions: string[] };
+
 export default function App() {
+  // --- Staff Portal SSO session ---------------------------------------
+  // This app has no login screen of its own: it only ever runs for a user
+  // who arrived via the portal's SSO handoff (src/auth/SsoHandler.tsx),
+  // which leaves behind an httpOnly `lga_session` cookie. We can't read
+  // that cookie from JS, so we ask the backend who it belongs to; no valid
+  // session means straight back to the portal's login.
+  const [sessionUser, setSessionUser] = useState<SsoUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [showSsoNotice, setShowSsoNotice] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState({ top: 0, right: 0 });
+  const profileButtonRef = React.useRef<HTMLButtonElement>(null);
+
+  const toggleProfileMenu = () => {
+    if (!profileMenuOpen && profileButtonRef.current) {
+      const rect = profileButtonRef.current.getBoundingClientRect();
+      setMenuAnchor({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+    }
+    setProfileMenuOpen((v) => !v);
+  };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/auth/me`, { credentials: "include" });
+        if (res.status === 403) {
+          // Signed in, but the Staff Portal says no access (revoked, suspended
+          // or never given). Its own page explains, and offers "My access".
+          window.location.href = `${PORTAL_URL}/app/LGA`;
+          return;
+        }
+        if (!res.ok) throw new Error("not signed in");
+        const data = await res.json();
+        const permissions: string[] = Array.isArray(data.permissions) ? data.permissions : [];
+        setSessionUser({ name: data.name, role: data.role, permissions });
+        // Open on a tab this person can actually use.
+        if (!permissions.includes("leads.generate") && permissions.some((p) => p.startsWith("outreach."))) {
+          setActiveTab("outreach");
+        }
+        setAuthChecked(true);
+      } catch {
+        window.location.href = `${PORTAL_URL}/login`;
+      }
+    })();
+  }, []);
+
+  // Clicking the profile chip signs out of THIS app only (unlike the
+  // portal's "Sign out of all apps", which also reaches this endpoint).
+  // The portal's own session is untouched, so landing on its dashboard
+  // still shows the user signed in and able to open another agent.
+  const handleProfileLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await fetch(`${API_BASE_URL}/api/auth/logout`, { method: "POST", credentials: "include" });
+    } finally {
+      window.location.href = `${PORTAL_URL}/dashboard`;
+    }
+  };
+
   const [savingDB, setSavingDB] = useState(false);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [outreachLeads, setOutreachLeads] = useState<any[]>([]);
@@ -62,7 +130,7 @@ export default function App() {
 
   const fetchTemplates = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/email-templates`);
+      const res = await fetch(`${API_BASE_URL}/api/email-templates`, { credentials: "include" });
       const data = await res.json();
       setTemplates(data.templates || []);
     } catch (e) {
@@ -70,9 +138,15 @@ export default function App() {
     }
   };
 
+  // What the Staff Portal lets this person do here (see src/auth/permissions.tsx).
+  const can = (permission: string) => Boolean(sessionUser?.permissions.includes(permission));
+  const canGenerate = can("leads.generate");
+  const canOutreach = can("outreach.send_email") || can("outreach.send_bulk");
+
   useEffect(() => {
-    fetchTemplates();
-  }, []);
+    if (authChecked && can("outreach.send_email")) fetchTemplates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authChecked]);
 
   // Lock body scroll when mobile sidebar drawer is open
   useEffect(() => {
@@ -91,7 +165,7 @@ export default function App() {
     setSmtpStatus("idle");
     setSmtpError("");
     try {
-      const res = await fetch(`${API_BASE_URL}/api/test-smtp`, { method: "POST" });
+      const res = await fetch(`${API_BASE_URL}/api/test-smtp`, { method: "POST", credentials: "include" });
       const data = await res.json();
       if (data.status === "success") {
         setSmtpStatus("success");
@@ -118,6 +192,7 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/email-templates`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           template_name: newTemplateName,
@@ -144,7 +219,7 @@ export default function App() {
     e.stopPropagation();
     if (!confirm("Are you sure you want to delete this template?")) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/email-templates/${id}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE_URL}/api/email-templates/${id}`, { method: "DELETE", credentials: "include" });
       const data = await res.json();
       if (data.success) {
         toast.success("Template deleted!");
@@ -232,6 +307,7 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/send-email`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: lead.email,
@@ -345,6 +421,7 @@ export default function App() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/send-bulk-email`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(bodyPayload)
       });
@@ -499,6 +576,7 @@ export default function App() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/save-leads`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -531,7 +609,18 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Block the real UI from ever flashing on screen before we know the
+  // Staff Portal session check (above) has passed.
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-[#FAFAFD] flex items-center justify-center">
+        <Loader2 className="w-6 h-6 text-[#6B2BFF] animate-spin" />
+      </div>
+    );
+  }
+
   return (
+    <PermissionsProvider permissions={sessionUser?.permissions ?? []}>
     <div className="min-h-screen text-[#1A1A24] font-medium font-sans selection:bg-[#6B2BFF]/20 flex flex-col items-stretch overflow-hidden bg-[#FAFAFD] relative">
       <Toaster position="top-right" />
 
@@ -563,12 +652,112 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 justify-end">
-          <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#6B2BFF] to-[#D0B8FF] flex items-center justify-center text-[10px] font-bold text-white border-2 border-white shadow-sm">
-            BB
-          </div>
+        <div className="flex items-center gap-2.5 justify-end relative">
+          {sessionUser ? (
+            <>
+              <button
+                ref={profileButtonRef}
+                type="button"
+                onClick={toggleProfileMenu}
+                title="Account menu"
+                aria-haspopup="menu"
+                aria-expanded={profileMenuOpen}
+                className="flex items-center gap-1.5 rounded-full pr-2 pl-2.5 py-1 hover:bg-slate-100 transition-colors group"
+              >
+                <span className="hidden sm:inline text-[12.5px] font-semibold text-[#5A5A6D] group-hover:text-[#111118]">
+                  {sessionUser.name}
+                </span>
+                <span className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#6B2BFF] to-[#D0B8FF] flex items-center justify-center text-[10px] font-bold text-white border-2 border-white shadow-sm shrink-0">
+                  {sessionUser.name.charAt(0).toUpperCase()}
+                </span>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-[#A0A0B2] transition-transform ${profileMenuOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+
+              {// Portalled to <body>, both the backdrop AND the menu: the
+              // header has `will-change-transform` (for smooth scroll perf),
+              // which — like an actual transform — turns it into the
+              // containing block for `position: fixed` descendants. Left
+              // inside the header, a fixed backdrop would only cover the
+              // header's own box, and (worse) would float ABOVE the menu
+              // instead of below it, swallowing clicks meant for "Sign out".
+              // The menu's position is computed from the trigger button's
+              // own rect since it can no longer rely on CSS `absolute`
+              // positioning relative to a parent once portalled out.
+              profileMenuOpen &&
+                createPortal(
+                  <>
+                    <div className="fixed inset-0 z-[45]" onClick={() => setProfileMenuOpen(false)} />
+                    <AnimatePresence>
+                      <motion.div
+                        initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                        transition={{ duration: 0.15 }}
+                        style={{ position: "fixed", top: menuAnchor.top, right: menuAnchor.right }}
+                        className="w-56 bg-white border border-[#EDEDF4] shadow-xl rounded-xl p-1.5 z-50"
+                        role="menu"
+                      >
+                        <div className="px-3 py-2 border-b border-[#EDEDF4] mb-1">
+                          <p className="text-[13px] font-bold text-[#111118] truncate">{sessionUser.name}</p>
+                          <p className="text-[11px] text-[#9A9AAD]">Signed in via Staff Portal</p>
+                        </div>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={handleProfileLogout}
+                          disabled={loggingOut}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-semibold text-red-600 hover:bg-red-50 transition-colors disabled:opacity-60"
+                        >
+                          {loggingOut ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <LogOut className="w-4 h-4" />
+                          )}
+                          {loggingOut ? "Signing out…" : "Sign out"}
+                        </button>
+                      </motion.div>
+                    </AnimatePresence>
+                  </>,
+                  document.body,
+                )}
+            </>
+          ) : (
+            <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#6B2BFF] to-[#D0B8FF] flex items-center justify-center text-[10px] font-bold text-white border-2 border-white shadow-sm">
+              BB
+            </div>
+          )}
         </div>
       </header>
+
+      {/* Signed in automatically via the Staff Portal's SSO handoff — no second password needed */}
+      <AnimatePresence>
+        {showSsoNotice && sessionUser && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="overflow-hidden shrink-0 z-10 relative"
+          >
+            <div className="flex items-center gap-2.5 bg-green-50 border-b border-green-100 text-green-800 px-6 py-2 text-[12.5px]">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span className="flex-1">
+                <strong className="font-bold">Signed in automatically — no second password needed.</strong>{" "}
+                {sessionUser.name} used the Bhatia Brothers Staff Portal sign-in.
+              </span>
+              <button
+                onClick={() => setShowSsoNotice(false)}
+                aria-label="Dismiss"
+                className="text-green-700 hover:text-green-900 shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Body with Sidebar and Main */}
       <div className="flex-1 flex overflow-hidden z-10 relative mt-0.5">
@@ -594,6 +783,7 @@ export default function App() {
             </button>
           </div>
 
+          {canGenerate && (
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -611,7 +801,9 @@ export default function App() {
             {activeTab === "generate" && <motion.div layoutId="sidebar-active" className="absolute inset-0 bg-[#111118] -z-10" />}
             <Search className="w-4 h-4" /> Generate Leads
           </motion.button>
+          )}
 
+          {canOutreach && (
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -624,13 +816,24 @@ export default function App() {
             {activeTab === "outreach" && <motion.div layoutId="sidebar-active" className="absolute inset-0 bg-[#111118] -z-10" />}
             <Mail className="w-4 h-4" /> Email Outreach
           </motion.button>
+          )}
         </aside>
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-auto flex flex-col custom-scroll">
           <div className="max-w-[1600px] w-full mx-auto px-8 py-8 flex flex-col h-full gap-8">
+            {!canGenerate && !canOutreach && (
+              <div className="m-auto max-w-sm text-center flex flex-col items-center gap-2">
+                <AlertCircle className="w-6 h-6 text-[#A0A0B2]" />
+                <h2 className="text-[15px] font-bold text-[#111118]">No Lead Gen features assigned yet</h2>
+                <p className="text-[13px] text-[#7A7A8F]">
+                  You can open Lead Gen Agent, but your role here doesn&apos;t include any features. Ask a Staff Portal
+                  administrator to give you a role.
+                </p>
+              </div>
+            )}
             <AnimatePresence mode="wait">
-              {activeTab === "generate" && (
+              {activeTab === "generate" && canGenerate && (
                 <motion.div
                   key="generate"
                   initial={{ opacity: 0, y: 15 }}
@@ -653,7 +856,7 @@ export default function App() {
                 </motion.div>
               )}
 
-              {activeTab === "outreach" && (
+              {activeTab === "outreach" && canOutreach && (
                 <motion.div
                   key="outreach"
                   initial={{ opacity: 0, y: 15 }}
@@ -805,7 +1008,7 @@ export default function App() {
                             </select>
                             <ChevronDown className="w-4 h-4 text-[#A0A0B2] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                           </div>
-                          {selectedTemplateId && (
+                          {selectedTemplateId && can("outreach.manage_templates") && (
                             <button
                               onClick={(e) => handleDeleteTemplate(parseInt(selectedTemplateId), e)}
                               className="h-10 px-3 bg-white border border-red-100 text-red-500 hover:bg-red-50 rounded-lg flex items-center justify-center transition-colors"
@@ -841,6 +1044,7 @@ export default function App() {
                       </div>
 
                       {/* Save Template Helper */}
+                      {can("outreach.manage_templates") && (
                       <div className="border border-[#EDEDF4] bg-[#FAFAFD] rounded-xl p-4 flex flex-col gap-3">
                         <div className="flex items-center justify-between">
                           <span className="text-[12px] font-bold text-[#111118]">Save outreach text as template?</span>
@@ -869,6 +1073,7 @@ export default function App() {
                           </div>
                         )}
                       </div>
+                      )}
                     </div>
 
                     {/* Right Pane - Config & Preview */}
@@ -877,6 +1082,7 @@ export default function App() {
                       <div className="bg-[#FAFAFD] border border-[#EDEDF4] rounded-xl p-4 shadow-sm flex flex-col gap-3">
                         <div className="flex items-center justify-between">
                           <span className="text-[12px] font-bold text-[#111118]">Gmail SMTP Server Status</span>
+                          {can("outreach.test_smtp") && (
                           <button
                             onClick={handleTestSmtp}
                             disabled={smtpChecking}
@@ -885,6 +1091,7 @@ export default function App() {
                             {smtpChecking ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
                             Test Connect
                           </button>
+                          )}
                         </div>
                         {smtpStatus === "success" && (
                           <div className="flex items-center gap-1.5 text-[11px] font-bold text-green-600">
@@ -1064,5 +1271,6 @@ export default function App() {
         }
       `}</style>
     </div>
+    </PermissionsProvider>
   );
 }
