@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Loader2, ShieldAlert } from "lucide-react";
 import { API_BASE_URL } from "@/src/apiConfig";
 
-const PORTAL_URL = process.env.PORTAL_URL || "http://localhost:3000";
+const PORTAL_URL = process.env.PORTAL_URL ;
 
 /**
  * Step 2+ of the cross-app SSO handoff (see the Staff Portal's
