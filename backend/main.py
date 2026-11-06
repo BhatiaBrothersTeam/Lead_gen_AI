@@ -5,14 +5,14 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 # Load environment variables from .env, then .env.local (matching the Vite
 # frontend's own cascade, where a .local file wins) for SSO-related secrets.
 load_dotenv()
 load_dotenv(".env.local", override=True)
 
-from backend.database.connection import init_db_pool, close_db_pool
+from backend.database.connection import init_db_pool, close_db_pool, get_pool
 from backend.services.database import initialize_tables
 from backend.api.routes.leads import router as leads_router
 from backend.api.routes.auth import router as auth_router
@@ -29,15 +29,25 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize DB Pool and tables
     dsn = os.getenv("DATABASE_URL", "postgres://postgres:root@localhost:5432/Lead_DB")
     logger.info("Initializing PostgreSQL pool...")
-    await init_db_pool(dsn=dsn)
-    
-    logger.info("Initializing database schemas...")
+    # An unreachable database must not stop the whole app from starting: the
+    # SPA, SSO sign-in and /health still work, and /health reports the
+    # database as down. Routes that need the pool fail on their own.
+    db_ready = False
     try:
-        await initialize_tables()
-        logger.info("Database schemas initialized successfully.")
+        await init_db_pool(dsn=dsn)
+        db_ready = True
     except Exception as err:
-        logger.error(f"Error initializing database schemas: {err}")
-        
+        # The error type only: a connection error message can echo the host.
+        logger.error(f"Could not connect to PostgreSQL ({type(err).__name__}). Check DATABASE_URL.")
+
+    if db_ready:
+        logger.info("Initializing database schemas...")
+        try:
+            await initialize_tables()
+            logger.info("Database schemas initialized successfully.")
+        except Exception as err:
+            logger.error(f"Error initializing database schemas: {err}")
+
     yield
     
     # Shutdown: Close DB Pool
@@ -74,7 +84,13 @@ app.include_router(auth_router)
 # Healthcheck
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "LeadGen AI Backend"}
+    try:
+        await get_pool()
+        database = "ok"
+    except RuntimeError:
+        database = "unavailable"
+    body = {"status": "ok" if database == "ok" else "degraded", "service": "LeadGen AI Backend", "database": database}
+    return JSONResponse(status_code=200 if database == "ok" else 503, content=body)
 
 # Production client bundle serving logic (Vite dist)
 # Check if static dist files exist, and mount them if so

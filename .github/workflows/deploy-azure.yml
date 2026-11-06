@@ -67,7 +67,9 @@ jobs:
       # 8. Build React frontend
       - name: Build frontend
         env:
-          PORTAL_URL: ${{ vars.PORTAL_URL }}
+          # Where the frontend sends people who aren't signed in (the Staff Portal).
+          PORTAL_URL: ${{ vars.PORTAL_URL || 'https://staff-portal-endkc9b6hycxekb3.centralindia-01.azurewebsites.net' }}
+          # Leave unset: the backend serves this frontend, so the API is same-origin.
           VITE_API_URL: ${{ vars.VITE_API_URL }}
         run: npm run build
 
@@ -106,6 +108,9 @@ jobs:
         with:
           app-name: lead-gen-agent
           package: ${{ runner.temp }}/lead-gen-agent.zip
+          # FastAPI is ASGI: Azure's default Python startup can't find it.
+          # One worker keeps the in-memory SSO replay check (auth.py) reliable.
+          startup-command: python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 
       # 13. Logout
       - name: Azure logout
