@@ -140,10 +140,19 @@ async def sso_exchange(request: Request, response: Response):
     if not isinstance(token, str) or len(token) > 8192:
         raise HTTPException(status_code=400, detail="Missing token")
 
+    # A missing secret is a server misconfiguration, not a bad token: say so
+    # (503 + a clear log line) instead of failing with a bare 500.
+    try:
+        handoff_secret = _handoff_secret()
+        session_secret = _session_secret()
+    except RuntimeError as exc:
+        logger.error(f"SSO sign-in is not configured: {exc}. Set it in the App Service settings.")
+        raise HTTPException(status_code=503, detail="Sign-in is not configured on this server")
+
     try:
         claims = jwt.decode(
             token,
-            _handoff_secret(),
+            handoff_secret,
             algorithms=["HS256"],
             audience=HANDOFF_AUDIENCE,
             issuer=HANDOFF_ISSUER,
@@ -176,7 +185,7 @@ async def sso_exchange(request: Request, response: Response):
         "role": role,
         "exp": datetime.now(timezone.utc) + timedelta(seconds=SESSION_MAX_AGE_SECONDS),
     }
-    session_token = jwt.encode(session_claims, _session_secret(), algorithm="HS256")
+    session_token = jwt.encode(session_claims, session_secret, algorithm="HS256")
 
     response.set_cookie(
         key=SESSION_COOKIE_NAME,

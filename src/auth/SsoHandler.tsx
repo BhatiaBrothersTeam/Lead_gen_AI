@@ -34,14 +34,21 @@ export function SsoHandler() {
           body: JSON.stringify({ token }),
         });
 
+        if (res.status === 503) {
+          throw new Error("not_configured");
+        }
         if (!res.ok) {
           throw new Error("sso_failed");
         }
 
         // Drop the one-time token from the URL and land on the real app.
         window.location.replace("/");
-      } catch {
-        setError("Your sign-in link expired or is invalid.");
+      } catch (err) {
+        setError(
+          err instanceof Error && err.message === "not_configured"
+            ? "Sign-in isn't set up on this server yet. Please contact an administrator."
+            : "Your sign-in link expired or is invalid.",
+        );
         window.setTimeout(() => {
           window.location.replace(`${PORTAL_URL}/login?error=sso_failed`);
         }, 1800);
