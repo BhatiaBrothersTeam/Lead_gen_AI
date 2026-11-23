@@ -4,6 +4,31 @@ import { API_BASE_URL } from "@/src/apiConfig";
 
 const PORTAL_URL = process.env.PORTAL_URL ;
 
+// The handoff token works exactly once (the backend rejects a reused jti).
+// React StrictMode runs effects twice in development, which would send the
+// same token twice and fail the second exchange, so only exchange it once.
+let exchangeStarted = false;
+
+// Reasons the backend passes through from the Staff Portal's access check
+// (backend/api/routes/access.py), plus its own "portal_unavailable".
+function noAccessMessage(reason: string): string {
+  switch (reason) {
+    case "portal_unavailable":
+      return "The Staff Portal couldn't confirm your access right now. Please try again.";
+    case "unknown_user":
+      return "There's no Staff Portal account for you yet.";
+    case "account_pending":
+      return "Your Staff Portal account is waiting for an administrator's approval.";
+    case "account_rejected":
+    case "account_suspended":
+      return "Your Staff Portal account isn't active.";
+    case "application_inactive":
+      return "Lead Gen Agent is currently switched off in the Staff Portal.";
+    default:
+      return "You don't have access to Lead Gen Agent.";
+  }
+}
+
 /**
  * Step 2+ of the cross-app SSO handoff (see the Staff Portal's
  * src/lib/sso.ts for the full flow, and backend/api/routes/auth.py for the
@@ -25,6 +50,9 @@ export function SsoHandler() {
       return;
     }
 
+    if (exchangeStarted) return;
+    exchangeStarted = true;
+
     (async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/auth/sso`, {
@@ -37,6 +65,10 @@ export function SsoHandler() {
         if (res.status === 503) {
           throw new Error("not_configured");
         }
+        if (res.status === 403) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(`no_access:${typeof body?.reason === "string" ? body.reason : ""}`);
+        }
         if (!res.ok) {
           throw new Error("sso_failed");
         }
@@ -44,10 +76,13 @@ export function SsoHandler() {
         // Drop the one-time token from the URL and land on the real app.
         window.location.replace("/");
       } catch (err) {
+        const reason = err instanceof Error ? err.message : "";
         setError(
-          err instanceof Error && err.message === "not_configured"
+          reason === "not_configured"
             ? "Sign-in isn't set up on this server yet. Please contact an administrator."
-            : "Your sign-in link expired or is invalid.",
+            : reason.startsWith("no_access:")
+              ? noAccessMessage(reason.slice("no_access:".length))
+              : "Your sign-in link expired or is invalid.",
         );
         window.setTimeout(() => {
           window.location.replace(`${PORTAL_URL}/login?error=sso_failed`);
