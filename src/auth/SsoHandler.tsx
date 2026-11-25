@@ -73,8 +73,18 @@ export function SsoHandler() {
           throw new Error("sso_failed");
         }
 
-        // Drop the one-time token from the URL and land on the real app.
-        window.location.replace("/");
+        // Drop the one-time token from the URL and land on the real app,
+        // back on the page the person was opening (e.g. a lead link), if any.
+        let returnTo = "/";
+        try {
+          const saved = sessionStorage.getItem("lga_return_to");
+          sessionStorage.removeItem("lga_return_to");
+          // Same-site paths only: never an absolute or protocol-relative URL.
+          if (saved && /^\/[A-Za-z0-9/_-]*$/.test(saved) && !saved.startsWith("//")) returnTo = saved;
+        } catch {
+          /* storage unavailable */
+        }
+        window.location.replace(returnTo);
       } catch (err) {
         const reason = err instanceof Error ? err.message : "";
         setError(

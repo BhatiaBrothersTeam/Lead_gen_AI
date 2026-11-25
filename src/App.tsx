@@ -7,17 +7,22 @@ import { toast, Toaster } from "sonner";
 import {
   Loader2, Search, Mail, Command, Database, FolderDown, Sparkles, Settings,
   Send, X, AlertCircle, Trash2, ChevronDown, Building2, MapPin, Linkedin, Phone, Globe, Copy, Menu,
-  CheckCircle2, LogOut
+  CheckCircle2, LogOut, Handshake
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { GenerateLeads } from "./components/GenerateLeads";
 import { EmailOutreach } from "./components/EmailOutreach";
+import { LeadMatchmaker, leadIdFromPath } from "./components/matchmaker/LeadMatchmaker";
 import { API_BASE_URL } from "./apiConfig";
 import { PermissionsProvider } from "./auth/permissions";
 
 const PORTAL_URL = process.env.PORTAL_URL || "http://localhost:3000";
 
 type SsoUser = { name: string; role: string; permissions: string[] };
+export type AppTab = "generate" | "outreach" | "matchmaker";
+
+// A link to one Lead Matchmaker lead (/leads/LED-…), e.g. from the website's admin page.
+const initialLeadId = leadIdFromPath(window.location.pathname);
 
 export default function App() {
   // --- Staff Portal SSO session ---------------------------------------
@@ -57,11 +62,19 @@ export default function App() {
         const permissions: string[] = Array.isArray(data.permissions) ? data.permissions : [];
         setSessionUser({ name: data.name, role: data.role, permissions });
         // Open on a tab this person can actually use.
-        if (!permissions.includes("leads.generate") && permissions.some((p) => p.startsWith("outreach."))) {
+        if (initialLeadId && (permissions.includes("leads.generate") || permissions.includes("leads.save"))) {
+          setActiveTab("matchmaker");
+        } else if (!permissions.includes("leads.generate") && permissions.some((p) => p.startsWith("outreach."))) {
           setActiveTab("outreach");
         }
         setAuthChecked(true);
       } catch {
+        // Come back to the same page (e.g. a lead link) after signing in.
+        try {
+          if (window.location.pathname !== "/") sessionStorage.setItem("lga_return_to", window.location.pathname);
+        } catch {
+          /* storage unavailable: land on the home page instead */
+        }
         window.location.href = `${PORTAL_URL}/login`;
       }
     })();
@@ -83,7 +96,7 @@ export default function App() {
   const [savingDB, setSavingDB] = useState(false);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [outreachLeads, setOutreachLeads] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<"generate" | "outreach">("generate");
+  const [activeTab, setActiveTab] = useState<AppTab>("generate");
   const [selectedLeads, setSelectedLeads] = useState<Set<number>>(new Set());
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -142,6 +155,12 @@ export default function App() {
   const can = (permission: string) => Boolean(sessionUser?.permissions.includes(permission));
   const canGenerate = can("leads.generate");
   const canOutreach = can("outreach.send_email") || can("outreach.send_bulk");
+  const canMatchmaker = can("leads.generate") || can("leads.save");
+
+  // Leaving the Lead Matchmaker: drop its /leads/… address.
+  useEffect(() => {
+    if (activeTab !== "matchmaker" && window.location.pathname !== "/") window.history.replaceState(null, "", "/");
+  }, [activeTab]);
 
   useEffect(() => {
     if (authChecked && can("outreach.send_email")) fetchTemplates();
@@ -817,12 +836,27 @@ export default function App() {
             <Mail className="w-4 h-4" /> Email Outreach
           </motion.button>
           )}
+
+          {canMatchmaker && (
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => {
+              setSidebarOpen(false);
+              setActiveTab("matchmaker");
+            }}
+            className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[13px] font-semibold transition-all duration-300 relative overflow-hidden ${activeTab === "matchmaker" ? "bg-[#111118] text-white shadow-md shadow-[#111118]/20" : "text-[#5A5A6D] hover:bg-white hover:shadow-sm"}`}
+          >
+            {activeTab === "matchmaker" && <motion.div layoutId="sidebar-active" className="absolute inset-0 bg-[#111118] -z-10" />}
+            <Handshake className="w-4 h-4" /> Lead Matchmaker
+          </motion.button>
+          )}
         </aside>
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-auto flex flex-col custom-scroll">
           <div className="max-w-[1600px] w-full mx-auto px-8 py-8 flex flex-col h-full gap-8">
-            {!canGenerate && !canOutreach && (
+            {!canGenerate && !canOutreach && !canMatchmaker && (
               <div className="m-auto max-w-sm text-center flex flex-col items-center gap-2">
                 <AlertCircle className="w-6 h-6 text-[#A0A0B2]" />
                 <h2 className="text-[15px] font-bold text-[#111118]">No Lead Gen features assigned yet</h2>
@@ -876,6 +910,19 @@ export default function App() {
                     openBulkComposeModal={openBulkComposeModal}
                     clearOutreachState={clearOutreachState}
                   />
+                </motion.div>
+              )}
+
+              {activeTab === "matchmaker" && canMatchmaker && (
+                <motion.div
+                  key="matchmaker"
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  transition={{ duration: 0.3, ease: "easeOut" }}
+                  className="flex flex-col"
+                >
+                  <LeadMatchmaker initialLeadId={initialLeadId} />
                 </motion.div>
               )}
             </AnimatePresence>

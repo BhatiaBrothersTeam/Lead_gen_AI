@@ -62,6 +62,8 @@ jobs:
             backend.test_lead_division \
             backend.test_access_control \
             backend.test_secret_exposure \
+            backend.test_matchmaker_logic \
+            backend.test_matchmaker_flow \
             -v
 
       # 8. Build React frontend

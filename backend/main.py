@@ -16,6 +16,9 @@ from backend.database.connection import init_db_pool, close_db_pool, get_pool
 from backend.services.database import initialize_tables
 from backend.api.routes.leads import router as leads_router
 from backend.api.routes.auth import router as auth_router
+from backend.matchmaker.db import initialize_matchmaker_tables
+from backend.matchmaker.jobs import resume_unfinished
+from backend.matchmaker.routes import router as matchmaker_router
 
 # Setup logging
 logging.basicConfig(
@@ -47,6 +50,14 @@ async def lifespan(app: FastAPI):
             logger.info("Database schemas initialized successfully.")
         except Exception as err:
             logger.error(f"Error initializing database schemas: {err}")
+
+        # Lead Matchmaker module: its own schema, then pick up analyses a
+        # restart interrupted. A failure here must not stop Lead Gen itself.
+        try:
+            await initialize_matchmaker_tables()
+            await resume_unfinished()
+        except Exception as err:
+            logger.error(f"Error initializing Lead Matchmaker tables: {type(err).__name__}: {err}")
 
     yield
     
@@ -80,6 +91,7 @@ app.add_middleware(
 # Include B2B scanner routing APIs
 app.include_router(leads_router)
 app.include_router(auth_router)
+app.include_router(matchmaker_router)
 
 # Healthcheck
 @app.get("/health")

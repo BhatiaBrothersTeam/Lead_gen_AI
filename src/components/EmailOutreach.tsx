@@ -5,12 +5,13 @@ import { Mail, Upload, Send } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { useCan } from "../auth/permissions";
+import type { AppTab } from "../App";
 
 interface EmailOutreachProps {
   key?: React.Key;
   outreachLeads: any[];
   setOutreachLeads: React.Dispatch<React.SetStateAction<any[]>>;
-  setActiveTab: React.Dispatch<React.SetStateAction<"generate" | "outreach">>;
+  setActiveTab: React.Dispatch<React.SetStateAction<AppTab>>;
   leads: any[];
   setLeads: React.Dispatch<React.SetStateAction<any[]>>;
   openComposeModal: (lead: any) => void;
